@@ -43,4 +43,4 @@
 
 무단 사용 및 수정은 저작권 침해로 간주되며, 법적 처벌 대상이 될 수 있습니다.
 
-© 2026 All Rights Reserved.
+© 2026 신재원. All Rights Reserved.
