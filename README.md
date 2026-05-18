@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # 🎵 음방시스템 — School Broadcast Music Player
 
 > **학교 방송용 음악 재생 시스템** — Windows 앱 + Cloudflare 클라우드 백엔드 + 관리자 웹 포털
