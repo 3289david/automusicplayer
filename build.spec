@@ -11,6 +11,7 @@ binaries = []
 datas = [
     (str(root / "panel"), "panel"),
     (str(root / "broadcast"), "broadcast"),
+    (str(root / "website"), "website"),
     (str(root / "14720088.png"), "."),
 ]
 _ico = root / "app_icon.ico"

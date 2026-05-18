@@ -31,6 +31,7 @@
   }
 
   let lanPrimaryUrlFull = "";
+  let websitePrimaryUrlFull = "";
   let displaysCache = null;
   let displaysLoading = null;
   let playbackCurrentSec = 0;
@@ -684,16 +685,25 @@
       socket.emit("control", { action: "start", display_index: selectedDisplay });
     });
 
-    $("#btnCopyLan")?.addEventListener("click", () => {
-      if (!lanPrimaryUrlFull) return;
-      const done = () => showAppAlert("접속 주소를 복사했습니다.", { title: "복사" });
+    function copyUrlToClipboard(full, label) {
+      if (!full) return;
+      const done = () =>
+        showAppAlert(`${label} 접속 주소를 복사했습니다.`, { title: "복사" });
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(lanPrimaryUrlFull).then(done).catch(() => {
-          showAppAlert(lanPrimaryUrlFull, { title: "접속 주소" });
+        navigator.clipboard.writeText(full).then(done).catch(() => {
+          showAppAlert(full, { title: label });
         });
       } else {
-        showAppAlert(lanPrimaryUrlFull, { title: "접속 주소" });
+        showAppAlert(full, { title: label });
       }
+    }
+
+    $("#btnCopyLan")?.addEventListener("click", () => {
+      copyUrlToClipboard(lanPrimaryUrlFull, "컨트롤 패널");
+    });
+
+    $("#btnCopyWebsiteLan")?.addEventListener("click", () => {
+      copyUrlToClipboard(websitePrimaryUrlFull, "관리자 웹");
     });
 
     $("#btnPause").addEventListener("click", () => {
@@ -895,25 +905,44 @@
     }
   }
 
-  function showLanUrls(data) {
-    const el = $("#lanPrimaryUrl");
-    if (!el || !data) return;
-    const lanList = Array.isArray(data.panel_lan)
-      ? data.panel_lan
-      : Array.isArray(data.lan)
-        ? data.lan
+  function pickPrimaryUrl(data, lanKey, primaryKey, localKey, fallbackLanKey) {
+    const lanList = Array.isArray(data[lanKey])
+      ? data[lanKey]
+      : fallbackLanKey && Array.isArray(data[fallbackLanKey])
+        ? data[fallbackLanKey]
         : [];
-    const full =
-      data.panel_primary_lan ||
-      data.primary_lan ||
+    return (
+      data[primaryKey] ||
       (lanList.length ? lanList[0] : "") ||
-      data.panel_local ||
-      data.local ||
-      "";
-    lanPrimaryUrlFull = full;
+      data[localKey] ||
+      ""
+    );
+  }
+
+  function applyLanUrl(el, full) {
+    if (!el) return;
     const label = formatLanHostPort(full);
     el.textContent = label || "LAN 주소 없음";
     el.title = full || "";
+  }
+
+  function showLanUrls(data) {
+    if (!data) return;
+    lanPrimaryUrlFull = pickPrimaryUrl(
+      data,
+      "panel_lan",
+      "panel_primary_lan",
+      "panel_local",
+      "lan"
+    );
+    websitePrimaryUrlFull = pickPrimaryUrl(
+      data,
+      "website_lan",
+      "website_primary_lan",
+      "website_local"
+    );
+    applyLanUrl($("#lanPrimaryUrl"), lanPrimaryUrlFull);
+    applyLanUrl($("#websitePrimaryUrl"), websitePrimaryUrlFull);
   }
 
   function updateBrowserHint(available) {

@@ -35,12 +35,13 @@ from config_store import (
     ASSETS_DIR,
     BUNDLE_DIR,
     UPLOADS_DIR,
+    WEBSITE_PORT,
     ensure_dirs,
     is_setup_complete,
     load_config,
     save_config,
 )
-from network_utils import panel_urls
+from network_utils import network_access_urls, panel_urls
 from panel_log import get_logger
 from panel_window import enqueue_panel_window_command
 from playlist_store import load_playlist, save_playlist
@@ -480,16 +481,20 @@ def api_session_status():
 def api_public_config():
     cfg = load_config()
     port = int(cfg.get("port", 8765))
-    urls = panel_urls(port)
+    urls = network_access_urls(port, WEBSITE_PORT)
     return jsonify(
         {
             "port": port,
             "end_broadcast_image": cfg.get("end_broadcast_image", ""),
             "autostart": cfg.get("autostart", False),
             "setup_complete": is_setup_complete(cfg),
-            "panel_local": urls["local"],
-            "panel_lan": urls["lan"],
-            "panel_primary_lan": urls["primary_lan"],
+            "panel_local": urls["panel_local"],
+            "panel_lan": urls["panel_lan"],
+            "panel_primary_lan": urls["panel_primary_lan"],
+            "website_port": urls["website_port"],
+            "website_local": urls["website_local"],
+            "website_lan": urls["website_lan"],
+            "website_primary_lan": urls["website_primary_lan"],
             "broadcast_browser": cfg.get("broadcast_browser", "auto"),
             "onboarding_complete": bool(cfg.get("onboarding_complete")),
         }
@@ -503,7 +508,7 @@ def api_network():
         return jsonify({"error": "unauthorized"}), 401
     cfg = load_config()
     port = int(cfg.get("port", 8765))
-    return jsonify(panel_urls(port))
+    return jsonify(network_access_urls(port, WEBSITE_PORT))
 
 
 @app.route("/api/displays")

@@ -24,15 +24,34 @@
   <div class="app-shell">
     <aside class="sidebar" aria-label="메뉴">
       <div class="sidebar-brand">
+        <p class="sidebar-for-windows">
+          <span class="sidebar-for-text">For</span>
+          <span class="sidebar-windows-mark" aria-label="For Windows">
+            <img
+              class="sidebar-ms-logo"
+              src="/static/img/microsoft-logo.svg"
+              width="19"
+              height="19"
+              alt=""
+              decoding="async"
+            />
+            <span class="sidebar-windows-text">Windows</span>
+          </span>
+        </p>
         <h1 class="sidebar-title">3세대 음방시스템</h1>
         <p class="sidebar-sub">학교 방송 컨트롤</p>
       </div>
       <div class="card cf-sync-card" id="cfSyncCard">
         <h2 class="server-card-title">☁️ 클라우드 동기화</h2>
         <div class="lan-mini" id="lanAccessBox">
-          <p class="lan-mini-label">같은 Wi-Fi 접속 주소</p>
+          <p class="lan-mini-label">같은 Wi-Fi · 컨트롤 패널</p>
           <p class="lan-mini-url" id="lanPrimaryUrl" title="">불러오는 중…</p>
           <button type="button" class="btn-ghost btn-sm btn-block" id="btnCopyLan">주소 복사</button>
+        </div>
+        <div class="lan-mini" id="websiteLanBox">
+          <p class="lan-mini-label">같은 Wi-Fi · 관리자 웹 (포트 2026)</p>
+          <p class="lan-mini-url" id="websitePrimaryUrl" title="">불러오는 중…</p>
+          <button type="button" class="btn-ghost btn-sm btn-block" id="btnCopyWebsiteLan">주소 복사</button>
         </div>
         <p class="cf-sync-status" id="cfSyncStatus">대기 중</p>
         <button type="button" class="btn-cf-push btn-block" id="btnCfPush">
@@ -56,6 +75,23 @@
     </aside>
 
     <div class="main-area">
+      <header class="main-page-brand" aria-label="음방시스템 For Windows">
+        <span class="main-page-brand-name">음방시스템</span>
+        <span class="main-page-brand-for sidebar-for-windows">
+          <span class="sidebar-for-text">For</span>
+          <span class="sidebar-windows-mark">
+            <img
+              class="sidebar-ms-logo"
+              src="/static/img/microsoft-logo.svg"
+              width="19"
+              height="19"
+              alt=""
+              decoding="async"
+            />
+            <span class="sidebar-windows-text">Windows</span>
+          </span>
+        </span>
+      </header>
       <main class="tab-panels">
         <section class="tab-panel active" id="panel-playlist">
           <ul id="playlistList" class="playlist-list"></ul>

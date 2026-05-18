@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import socket
+from typing import Any
 
 
 def get_lan_ips() -> list[str]:
@@ -31,8 +32,8 @@ def get_lan_ips() -> list[str]:
     return found
 
 
-def panel_urls(port: int) -> dict[str, list[str] | str]:
-    """패널 접속 URL (로컬 + LAN)."""
+def host_urls(port: int) -> dict[str, list[str] | str]:
+    """지정 포트 HTTP 접속 URL (로컬 + LAN)."""
     local = f"http://127.0.0.1:{port}/"
     lan = [f"http://{ip}:{port}/" for ip in get_lan_ips()]
     primary_lan = lan[0] if lan else ""
@@ -40,4 +41,32 @@ def panel_urls(port: int) -> dict[str, list[str] | str]:
         "local": local,
         "lan": lan,
         "primary_lan": primary_lan,
+    }
+
+
+def panel_urls(port: int) -> dict[str, list[str] | str]:
+    """패널 접속 URL (로컬 + LAN)."""
+    return host_urls(port)
+
+
+def website_urls(port: int) -> dict[str, list[str] | str]:
+    """관리자 웹 포털 접속 URL (로컬 + LAN)."""
+    return host_urls(port)
+
+
+def network_access_urls(panel_port: int, website_port: int) -> dict[str, Any]:
+    """패널·웹 포털 LAN 주소를 한 번에 반환."""
+    panel = panel_urls(panel_port)
+    website = website_urls(website_port)
+    return {
+        "local": panel["local"],
+        "lan": panel["lan"],
+        "primary_lan": panel["primary_lan"],
+        "panel_local": panel["local"],
+        "panel_lan": panel["lan"],
+        "panel_primary_lan": panel["primary_lan"],
+        "website_port": website_port,
+        "website_local": website["local"],
+        "website_lan": website["lan"],
+        "website_primary_lan": website["primary_lan"],
     }

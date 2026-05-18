@@ -16,11 +16,12 @@ from panel_log import install_crash_logging, panel_log_path, setup_panel_logging
 from webview2_runtime import configure_bundled_webview2
 from app_meta import APP_NAME
 from broadcast_window import close_broadcast_window
-from config_store import load_config
-from network_utils import panel_urls
+from config_store import WEBSITE_PORT, load_config
+from network_utils import network_access_urls
 from panel_window import enqueue_panel_window_command, run_on_main_thread, run_panel_native, stop_panel_window
 from playlist_store import load_playlist, save_playlist
 from server import auto_setup_admin, broadcast_state, create_socketio_app, set_broadcast_queue, start_server_thread
+from website_server import start_website_server_thread
 from single_instance import ensure_single_instance
 from tray_icon import start_tray_thread, stop_tray
 
@@ -180,6 +181,7 @@ def main() -> None:
     create_socketio_app(cfg)
 
     start_server_thread(port)
+    start_website_server_thread(WEBSITE_PORT)
     time.sleep(1.0)
 
     threading.Thread(target=_command_worker, args=(port,), daemon=True).start()
@@ -192,14 +194,18 @@ def main() -> None:
             setup_panel_logging().info("CF auto-pull: %d songs loaded from D1", len(pl))
         cloudflare_sync.pull_background(cfg, _on_pull)
 
-    urls = panel_urls(port)
-    panel_addr = urls["primary_lan"] or urls["local"]
+    urls = network_access_urls(port, WEBSITE_PORT)
+    panel_addr = urls["panel_primary_lan"] or urls["panel_local"]
+    website_addr = urls["website_primary_lan"] or urls["website_local"]
     if not getattr(sys, "frozen", False):
         print("=" * 50)
         print(f"{APP_NAME} 실행 중 (단일 실행)")
         print(f"  패널(WebView2): {panel_addr}")
-        for lan in urls["lan"]:
-            print(f"  다른 기기: {lan}")
+        for lan in urls["panel_lan"]:
+            print(f"  패널(LAN): {lan}")
+        print(f"  관리자 웹: {website_addr}")
+        for lan in urls["website_lan"]:
+            print(f"  웹(LAN): {lan}")
         print("=" * 50)
 
     start_tray_thread(port, _shutdown, native_panel=True)

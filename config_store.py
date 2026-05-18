@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_PORT = 8765
+WEBSITE_PORT = 2026
 ALLOWED_UPLOAD_EXT = {".mp4", ".mkv", ".mp3", ".wav", ".m4a", ".webm", ".ogg", ".flac"}
 
 
