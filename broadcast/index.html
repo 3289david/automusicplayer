@@ -26,6 +26,101 @@
       background: #fff; z-index: 20;
     }
     #endScreen.show { display: flex; }
+    #trackTransition {
+      --pt-1: hsla(210, 52%, 82%, 0.5);
+      --pt-2: hsla(330, 48%, 84%, 0.45);
+      --pt-3: hsla(145, 42%, 80%, 0.48);
+      --pt-4: hsla(48, 55%, 86%, 0.42);
+      position: fixed;
+      inset: 0;
+      z-index: 32;
+      pointer-events: none;
+      overflow: hidden;
+      opacity: 0;
+      visibility: hidden;
+    }
+    #trackTransition.active {
+      opacity: 1;
+      visibility: visible;
+    }
+    .track-transition-wash {
+      position: absolute;
+      inset: -30%;
+      background:
+        radial-gradient(ellipse 72% 58% at 12% 22%, var(--pt-1) 0%, transparent 70%),
+        radial-gradient(ellipse 68% 62% at 88% 78%, var(--pt-2) 0%, transparent 72%),
+        radial-gradient(ellipse 85% 75% at 50% 48%, var(--pt-3) 0%, transparent 78%),
+        radial-gradient(ellipse 60% 55% at 78% 15%, var(--pt-4) 0%, transparent 68%);
+      filter: blur(56px) saturate(1.12);
+      opacity: 0;
+      transform: scale(1.04);
+      will-change: transform, opacity;
+    }
+    .track-transition-bloom {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(72px);
+      opacity: 0;
+      will-change: transform, opacity;
+    }
+    .track-transition-bloom-1 {
+      width: 85vmax;
+      height: 85vmax;
+      left: -28%;
+      top: -22%;
+      background: var(--pt-1);
+    }
+    .track-transition-bloom-2 {
+      width: 78vmax;
+      height: 78vmax;
+      right: -32%;
+      bottom: -26%;
+      background: var(--pt-2);
+    }
+    .track-transition-bloom-3 {
+      width: 70vmax;
+      height: 70vmax;
+      left: 18%;
+      bottom: -18%;
+      background: var(--pt-3);
+    }
+    #trackTransition.active .track-transition-wash {
+      animation: transitionWash 2.75s cubic-bezier(0.28, 0.06, 0.18, 1) forwards;
+    }
+    #trackTransition.active .track-transition-bloom-1 {
+      animation: transitionBloom1 2.9s cubic-bezier(0.28, 0.06, 0.18, 1) forwards;
+    }
+    #trackTransition.active .track-transition-bloom-2 {
+      animation: transitionBloom2 3s cubic-bezier(0.28, 0.06, 0.18, 1) 0.08s forwards;
+    }
+    #trackTransition.active .track-transition-bloom-3 {
+      animation: transitionBloom3 2.85s cubic-bezier(0.28, 0.06, 0.18, 1) 0.14s forwards;
+    }
+    @keyframes transitionWash {
+      0% { opacity: 0; transform: scale(1.02) translate3d(-4%, -3%, 0); }
+      20% { opacity: 0.78; }
+      48% { opacity: 0.72; transform: scale(1.14) translate3d(2%, 2%, 0); }
+      75% { opacity: 0.42; transform: scale(1.2) translate3d(5%, 4%, 0); }
+      100% { opacity: 0; transform: scale(1.24) translate3d(7%, 6%, 0); }
+    }
+    @keyframes transitionBloom1 {
+      0% { opacity: 0; transform: translate3d(-12%, -8%, 0) scale(0.88); }
+      28% { opacity: 0.52; }
+      58% { opacity: 0.48; transform: translate3d(18%, 14%, 0) scale(1.08); }
+      100% { opacity: 0; transform: translate3d(32%, 26%, 0) scale(1.16); }
+    }
+    @keyframes transitionBloom2 {
+      0% { opacity: 0; transform: translate3d(10%, 8%, 0) scale(0.9); }
+      30% { opacity: 0.48; }
+      60% { opacity: 0.44; transform: translate3d(-16%, -12%, 0) scale(1.1); }
+      100% { opacity: 0; transform: translate3d(-28%, -22%, 0) scale(1.18); }
+    }
+    @keyframes transitionBloom3 {
+      0% { opacity: 0; transform: translate3d(-6%, 12%, 0) scale(0.92); }
+      32% { opacity: 0.45; }
+      62% { opacity: 0.4; transform: translate3d(14%, -10%, 0) scale(1.06); }
+      100% { opacity: 0; transform: translate3d(22%, -18%, 0) scale(1.14); }
+    }
     #endScreen img { width: 100%; height: 100%; object-fit: cover; }
     #endScreen .end-text {
       font-size: clamp(32px, 6vw, 72px);
@@ -211,14 +306,6 @@
       flex: 1; min-width: 0; white-space: nowrap;
       overflow: hidden; text-overflow: ellipsis;
     }
-    .next-song-credit {
-      flex-shrink: 0; margin-top: 14px; padding-top: 14px;
-      border-top: 1px solid rgba(0,0,0,0.08);
-      font-size: 11px; color: rgba(15,23,42,0.45); text-align: center;
-    }
-    #nextSongPanel.theme-dark .next-song-credit {
-      border-top-color: rgba(255,255,255,0.1); color: rgba(255,255,255,0.38);
-    }
     .now-playing-line {
       margin: 8px 0 0; font-size: clamp(16px, 1.9vw, 22px);
       font-weight: 700; line-height: 1.4; color: #0f172a;
@@ -360,6 +447,13 @@
     <video id="localVideo" playsinline controls controlsList="nodownload" style="display:none"></video>
   </div>
 
+  <div id="trackTransition" aria-hidden="true">
+    <div class="track-transition-wash"></div>
+    <div class="track-transition-bloom track-transition-bloom-1"></div>
+    <div class="track-transition-bloom track-transition-bloom-2"></div>
+    <div class="track-transition-bloom track-transition-bloom-3"></div>
+  </div>
+
   <div id="audioUnlock" role="button" tabindex="0">화면을 눌러 방송 소리 켜기</div>
 
   <div id="endScreen">
@@ -401,7 +495,6 @@
           <h2 class="next-song-head">다음 곡</h2>
         </div>
         <ul class="next-song-list" id="nextSongList"></ul>
-        <p class="next-song-credit">Made by 신재원, 정규환</p>
       </div>
       <div class="side-alert-now-body" id="sideAlertNowBody">
         <span class="next-song-label">NOW PLAYING</span>
@@ -487,7 +580,78 @@
       var nextAlertTheme = "light";
       var nowPlayingTheme = "light";
       var NEXT_ALERT_MAX_SONGS = 3;
+      var NEXT_ALERT_MAX_VISIBLE_MS = 20000;
       var NOW_PLAYING_PANEL_MS = 5500;
+      var nextAlertMaxHideTimer = null;
+      var trackTransitionEl = document.getElementById("trackTransition");
+      var trackTransitionHideTimer = null;
+      var lastTrackTransitionKey = "";
+
+      function trackTransitionKey(item, index) {
+        if (index < 0 || !item) return "";
+        return (
+          index +
+          ":" +
+          (item.type || "") +
+          ":" +
+          (item.id || item.path || item.title || "")
+        );
+      }
+
+      function randomPastelHsla(alpha) {
+        var h = Math.floor(Math.random() * 360);
+        var s = 40 + Math.floor(Math.random() * 32);
+        var l = 74 + Math.floor(Math.random() * 16);
+        var a =
+          typeof alpha === "number" ? alpha : 0.38 + Math.random() * 0.22;
+        return "hsla(" + h + ", " + s + "%, " + l + "%, " + a.toFixed(2) + ")";
+      }
+
+      function applyRandomPastelTransitionColors() {
+        if (!trackTransitionEl) return;
+        trackTransitionEl.style.setProperty("--pt-1", randomPastelHsla());
+        trackTransitionEl.style.setProperty("--pt-2", randomPastelHsla());
+        trackTransitionEl.style.setProperty("--pt-3", randomPastelHsla());
+        trackTransitionEl.style.setProperty("--pt-4", randomPastelHsla());
+      }
+
+      function resetTransitionAnimations() {
+        var nodes = trackTransitionEl.querySelectorAll(
+          ".track-transition-wash, .track-transition-bloom"
+        );
+        for (var i = 0; i < nodes.length; i++) {
+          nodes[i].style.animation = "none";
+          void nodes[i].offsetWidth;
+          nodes[i].style.animation = "";
+        }
+      }
+
+      function playTrackTransition() {
+        if (!trackTransitionEl) return;
+        applyRandomPastelTransitionColors();
+        trackTransitionEl.classList.remove("active");
+        resetTransitionAnimations();
+        trackTransitionEl.classList.add("active");
+        trackTransitionEl.setAttribute("aria-hidden", "false");
+        if (trackTransitionHideTimer) clearTimeout(trackTransitionHideTimer);
+        trackTransitionHideTimer = setTimeout(function () {
+          trackTransitionEl.classList.remove("active");
+          trackTransitionEl.setAttribute("aria-hidden", "true");
+          trackTransitionHideTimer = null;
+        }, 3100);
+      }
+
+      function maybePlayTrackTransition(item, index) {
+        if (index < 0 || !item || endScreen.classList.contains("show")) return;
+        var key = trackTransitionKey(item, index);
+        if (!key || key === lastTrackTransitionKey) return;
+        if (lastTrackTransitionKey === "") {
+          lastTrackTransitionKey = key;
+          return;
+        }
+        lastTrackTransitionKey = key;
+        playTrackTransition();
+      }
 
       function escapeHtml(s) {
         var d = document.createElement("div");
@@ -566,6 +730,7 @@
 
       function hideNextSongPanel(skipAnim) {
         if (!nextSongPanel) return;
+        clearNextAlertMaxTimer();
         if (skipAnim || !nextSongPanel.classList.contains("show")) {
           nextSongPanel.classList.remove("show", "mode-now", "mode-msg");
           nextSongPanel.classList.add("mode-next");
@@ -597,8 +762,30 @@
         }
       }
 
+      function clearNextAlertMaxTimer() {
+        if (nextAlertMaxHideTimer) {
+          clearTimeout(nextAlertMaxHideTimer);
+          nextAlertMaxHideTimer = null;
+        }
+      }
+
+      function scheduleNextAlertMaxHide() {
+        clearNextAlertMaxTimer();
+        nextAlertMaxHideTimer = setTimeout(function () {
+          nextAlertMaxHideTimer = null;
+          if (
+            nextSongPanel &&
+            nextSongPanel.classList.contains("show") &&
+            nextSongPanel.classList.contains("mode-next")
+          ) {
+            hideNextSongPanel(false);
+          }
+        }, NEXT_ALERT_MAX_VISIBLE_MS);
+      }
+
       function hideAllAlerts() {
         clearAlertTimer();
+        clearNextAlertMaxTimer();
         hideNextSongPanel(true);
       }
 
@@ -606,6 +793,7 @@
         duration = duration || 3500;
         if (!nextSongPanel || !sideAlertMsgText) return;
         clearAlertTimer();
+        clearNextAlertMaxTimer();
         applyNextAlertBranding(null);
         sideAlertMsgText.textContent = msg;
         var keepVisible =
@@ -689,6 +877,7 @@
           entries.slice(0, NEXT_ALERT_MAX_SONGS)
         );
         slideInSidePanel("next");
+        scheduleNextAlertMaxHide();
       }
 
       function showNextSongsAlert() {
@@ -712,6 +901,7 @@
       function showNowPlayingToast(title, opts) {
         if (!nextSongPanel || !nowPlayingText) return;
         opts = opts || {};
+        clearNextAlertMaxTimer();
         applyNextAlertBranding(null);
         nowPlayingText.textContent =
           "\u25B6 \uC9C0\uAE08 \uC7AC\uC0DD: " + (title || "");
@@ -1436,6 +1626,8 @@
 
         var item = playlist[currentIndex];
         if (!item) return;
+
+        maybePlayTrackTransition(item, currentIndex);
 
         if (
           nextSongPanel &&
