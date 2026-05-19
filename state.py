@@ -6,6 +6,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
+from youtube_util import parse_youtube_video_id
+
 
 @dataclass
 class PlaylistItem:
@@ -32,9 +34,17 @@ class PlaylistItem:
             duration = float(data.get("duration") or 0)
         except (TypeError, ValueError):
             duration = 0
+        item_type = data.get("type", "youtube")
+        raw_id = str(data.get("song_id") or data.get("id") or "").strip()
+        if item_type == "youtube":
+            video_id = parse_youtube_video_id(raw_id) or ""
+            if not video_id and raw_id.isdigit():
+                video_id = ""
+        else:
+            video_id = raw_id
         return cls(
-            type=data.get("type", "youtube"),
-            id=data.get("id", ""),
+            type=item_type,
+            id=video_id,
             title=data.get("title", "제목 없음"),
             thumbnail=data.get("thumbnail", ""),
             path=data.get("path", ""),

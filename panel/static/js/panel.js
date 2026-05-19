@@ -131,6 +131,9 @@
       setControlsEnabled(socketConnected);
       updateServerStatusFromData(data);
     });
+
+    window.panelSocket = socket;
+    if (window.PlaybackRecoveryUI) window.PlaybackRecoveryUI.bindSocket(socket);
   }
 
   function updateProgressBar(currentSec, durationSec) {
@@ -1010,6 +1013,60 @@
     updateMobileControlBarInset();
   });
 
+  async function loadPlaybackRecoverySettings() {
+    try {
+      const res = await fetch("/api/settings/playback-recovery", {
+        credentials: "same-origin",
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const stall = document.getElementById("playbackStallSeconds");
+      if (stall) stall.value = data.playback_error_stall_seconds ?? 10;
+      const mode = data.playback_error_recover_mode || "manual";
+      document
+        .querySelectorAll('input[name="playbackRecoverMode"]')
+        .forEach((el) => {
+          el.checked = el.value === mode;
+        });
+    } catch (_) {}
+  }
+
+  function bindPlaybackRecoverySettings() {
+    const btn = document.getElementById("btnSavePlaybackRecovery");
+    const hint = document.getElementById("playbackRecoverySaveHint");
+    if (!btn) return;
+    btn.addEventListener("click", async () => {
+      const stall = document.getElementById("playbackStallSeconds");
+      const modeEl = document.querySelector(
+        'input[name="playbackRecoverMode"]:checked'
+      );
+      try {
+        const res = await fetch("/api/settings/playback-recovery", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": csrfToken,
+          },
+          body: JSON.stringify({
+            playback_error_stall_seconds: Number(stall?.value) || 10,
+            playback_error_recover_mode: modeEl?.value || "manual",
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "저장 실패");
+        if (hint) {
+          hint.textContent = "저장되었습니다.";
+          setTimeout(() => {
+            hint.textContent = "";
+          }, 2500);
+        }
+      } catch (err) {
+        showAppAlert(String(err.message || err));
+      }
+    });
+  }
+
   async function init() {
     initTabs();
     initSocket();
@@ -1030,6 +1087,8 @@
     updateMobileControlBarInset();
     requestAnimationFrame(updateMobileControlBarInset);
     initCfSync();
+    bindPlaybackRecoverySettings();
+    loadPlaybackRecoverySettings();
   }
 
   document.addEventListener("DOMContentLoaded", init);

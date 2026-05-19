@@ -1,6 +1,7 @@
 """Flask + SocketIO 서버."""
 from __future__ import annotations
 
+import os
 import queue
 import secrets
 import threading
@@ -36,6 +37,7 @@ from config_store import (
     BUNDLE_DIR,
     UPLOADS_DIR,
     WEBSITE_PORT,
+    bundle_dir,
     ensure_dirs,
     is_setup_complete,
     load_config,
@@ -44,6 +46,12 @@ from config_store import (
 from network_utils import network_access_urls, panel_urls
 from panel_log import get_logger
 from panel_window import enqueue_panel_window_command
+from playback_recovery import (
+    bump_stream_generation,
+    current_stream_generation,
+    playback_recovery,
+)
+from youtube_prefetch import schedule_youtube_prefetch
 from playlist_store import load_playlist, save_playlist
 from state import BroadcastState
 from youtube_search import search_youtube
@@ -213,8 +221,39 @@ def _emit_playback_status() -> None:
 
 def _emit_broadcast_track() -> None:
     """방송 키오스크 화면에 현재 트랙 반영 (자동 넘김 포함, 패널 연결과 무관)."""
+    resync_broadcast_clients()
+
+
+def _prefetch_playlist_streams(around_index: int | None = None) -> None:
+    """현재 곡·다음 곡 YouTube 스트림 URL 선로딩."""
     snap = broadcast_state.snapshot()
+    pl = snap.get("playlist") or []
+    cur = (
+        int(around_index)
+        if around_index is not None
+        else int(snap.get("current_index", -1))
+    )
+    start = max(0, cur)
+    ids: list[str] = []
+    for i in range(start, min(start + 3, len(pl))):
+        row = pl[i]
+        if isinstance(row, dict) and row.get("type") == "youtube" and row.get("id"):
+            ids.append(str(row["id"]))
+    if ids:
+        schedule_youtube_prefetch(ids, _cache_youtube_stream)
+
+
+def resync_broadcast_clients() -> None:
+    """방송 브라우저에 현재 재생 상태를 다시 보냄 (창이 늦게 열릴 때 유실 방지)."""
+    snap = broadcast_state.snapshot()
+    idx = int(snap.get("current_index", -1))
+    status = snap.get("playback_status", "stopped")
+    get_logger().info("broadcast resync index=%s status=%s", idx, status)
+    playback_recovery.notify_track_sync(idx, status)
     socketio.emit("load_track", snap, namespace="/broadcast")
+    socketio.emit("playback_status", {"status": status}, namespace="/broadcast")
+    if idx >= 0 and status in ("playing", "paused"):
+        _prefetch_playlist_streams(idx)
 
 
 def _cache_youtube_stream(video_id: str) -> dict[str, Any]:
@@ -316,6 +355,10 @@ def init_app(cfg: dict[str, Any]) -> None:
     global config_data
     config_data = cfg
     ensure_dirs()
+    # exe: 번들 경로가 준비된 뒤 static 폴더를 다시 지정
+    bundle_static = bundle_dir() / "panel" / "static"
+    if bundle_static.is_dir():
+        app.static_folder = str(bundle_static)
     app.config["SECRET_KEY"] = cfg["secret_key"]
     app.config["WTF_CSRF_ENABLED"] = True
     # LAN IP(192.168.x.x)로 접속 시 세션·CSRF 쿠키 허용
@@ -372,9 +415,21 @@ def login_page():
     return render_template_string(_read_auth_html("login"))
 
 
+@app.route("/broadcast-static/<path:filename>")
+def broadcast_static(filename: str):
+    """방송 페이지 전용 정적 파일 (panel/static 과 분리)."""
+    from flask import send_from_directory
+
+    return send_from_directory(bundle_dir() / "broadcast", filename)
+
+
 @app.route("/broadcast/")
 def broadcast_page():
-    return render_template_string(_read_broadcast_html())
+    try:
+        return render_template_string(_read_broadcast_html())
+    except FileNotFoundError:
+        get_logger().error("broadcast HTML missing bundle_dir=%s", BUNDLE_DIR)
+        return "broadcast/index.html not found in app bundle", 500
 
 
 @csrf.exempt
@@ -497,6 +552,12 @@ def api_public_config():
             "website_primary_lan": urls["website_primary_lan"],
             "broadcast_browser": cfg.get("broadcast_browser", "auto"),
             "onboarding_complete": bool(cfg.get("onboarding_complete")),
+            "playback_error_stall_seconds": int(
+                cfg.get("playback_error_stall_seconds", 10)
+            ),
+            "playback_error_recover_mode": cfg.get(
+                "playback_error_recover_mode", "manual"
+            ),
         }
     )
 
@@ -797,6 +858,64 @@ def api_onboarding():
     return jsonify({"ok": True, "complete": True})
 
 
+@app.route("/api/settings/playback-recovery", methods=["GET", "POST"])
+def api_playback_recovery_settings():
+    if not current_user.is_authenticated:
+        return jsonify({"error": "unauthorized"}), 401
+    cfg = load_config()
+    if request.method == "GET":
+        return jsonify(
+            {
+                "playback_error_stall_seconds": int(
+                    cfg.get("playback_error_stall_seconds", 10)
+                ),
+                "playback_error_recover_mode": cfg.get(
+                    "playback_error_recover_mode", "manual"
+                ),
+            }
+        )
+    data = request.get_json(silent=True) or {}
+    if "playback_error_stall_seconds" in data:
+        try:
+            cfg["playback_error_stall_seconds"] = max(
+                5, min(120, int(data["playback_error_stall_seconds"]))
+            )
+        except (TypeError, ValueError):
+            return jsonify({"error": "stall_seconds invalid"}), 400
+    if "playback_error_recover_mode" in data:
+        mode = str(data["playback_error_recover_mode"]).lower()
+        cfg["playback_error_recover_mode"] = "auto" if mode == "auto" else "manual"
+    save_config(cfg)
+    global config_data
+    config_data = cfg
+    return jsonify(
+        {
+            "ok": True,
+            "playback_error_stall_seconds": cfg.get("playback_error_stall_seconds", 10),
+            "playback_error_recover_mode": cfg.get(
+                "playback_error_recover_mode", "manual"
+            ),
+        }
+    )
+
+
+@app.route("/api/recovery/start", methods=["POST"])
+def api_recovery_start():
+    if not current_user.is_authenticated:
+        return jsonify({"error": "unauthorized"}), 401
+    if playback_recovery.start_recovery(initiated_by="api"):
+        return jsonify({"ok": True})
+    return jsonify({"error": "recovery already running"}), 409
+
+
+@app.route("/api/recovery/dismiss", methods=["POST"])
+def api_recovery_dismiss():
+    if not current_user.is_authenticated:
+        return jsonify({"error": "unauthorized"}), 401
+    playback_recovery.dismiss_error()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/settings/autostart", methods=["POST"])
 def api_autostart():
     if not current_user.is_authenticated:
@@ -939,6 +1058,19 @@ def cf_pull():
     if pl is None:
         return jsonify({"error": "DB에서 데이터를 가져오지 못했습니다"}), 502
 
+    for i, raw in enumerate(pl):
+        if (raw.get("type") or "youtube") == "youtube":
+            vid = parse_youtube_video_id(
+                str(raw.get("song_id") or raw.get("id") or "")
+            )
+            if not vid:
+                get_logger().warning(
+                    "cf pull: invalid youtube id at index=%s title=%r raw_id=%r",
+                    i,
+                    raw.get("title"),
+                    raw.get("id"),
+                )
+
     # Apply playlist
     broadcast_state.set_playlist(pl)
     save_playlist(pl)
@@ -997,9 +1129,23 @@ def on_panel_disconnect():
 
 @socketio.on("connect", namespace="/broadcast")
 def on_broadcast_connect():
-    emit("state_sync", broadcast_state.snapshot())
+    snap = broadcast_state.snapshot()
+    get_logger().info(
+        "broadcast client connected sid=%s index=%s status=%s",
+        request.sid,
+        snap.get("current_index"),
+        snap.get("playback_status"),
+    )
+    emit("state_sync", snap)
     cfg = load_config()
     emit("config", {"end_broadcast_image": cfg.get("end_broadcast_image", "")})
+    idx = int(snap.get("current_index", -1))
+    status = snap.get("playback_status", "stopped")
+    if idx >= 0 and status in ("playing", "paused"):
+        playback_recovery.notify_track_sync(idx, status)
+        emit("load_track", snap)
+        emit("playback_status", {"status": status})
+        _prefetch_playlist_streams(idx)
 
 
 def _require_auth_event(fn: Callable) -> Callable:
@@ -1160,15 +1306,24 @@ def on_youtube_embed_blocked(data=None):
 
     item = broadcast_state.current_item()
     title = (payload.get("title") or (item.title if item else "")) or "YouTube"
+    _prefetch_playlist_streams(finished_index)
+
+    stream_gen = current_stream_generation()
 
     def worker() -> None:
         try:
+            if stream_gen != current_stream_generation():
+                return
             meta = _cache_youtube_stream(video_id)
+            if stream_gen != current_stream_generation():
+                return
             duration = float(meta.get("duration") or 0)
             if duration <= 0 and item:
                 duration = float(item.duration or 0)
             if duration <= 0:
                 duration = _fetch_youtube_duration(video_id)
+            if stream_gen != current_stream_generation():
+                return
             socketio.emit(
                 "youtube_stream_playback",
                 {
@@ -1246,15 +1401,75 @@ def on_broadcast_request_sync(_data=None):
         socketio.emit("broadcast_ended", {}, namespace="/broadcast")
 
 
+@socketio.on("playback_heartbeat", namespace="/broadcast")
+def on_playback_heartbeat(data=None):
+    playback_recovery.on_heartbeat(data if isinstance(data, dict) else None)
+
+
 @socketio.on("playback_progress", namespace="/broadcast")
 def on_playback_progress_from_broadcast(data):
     """방송 키오스크 창(비로그인) → 패널 진행률 바."""
+    playback_recovery.on_progress(data if isinstance(data, dict) else None)
     socketio.emit("playback_progress", data)
 
 
 @socketio.on("playback_progress")
 def on_playback_progress(data):
+    playback_recovery.on_progress(data if isinstance(data, dict) else None)
     socketio.emit("playback_progress", data)
+
+
+@socketio.on("playback_error_report", namespace="/broadcast")
+def on_playback_error_report(data=None):
+    payload = data if isinstance(data, dict) else {}
+    code = str(payload.get("code") or "playback")
+    message = str(payload.get("message") or "방송 재생 오류")
+    playback_recovery.report_error(
+        code,
+        message,
+        source="broadcast",
+        detail=str(payload.get("detail") or ""),
+    )
+
+
+@socketio.on("playback_error_report")
+@login_required_socket
+def on_panel_playback_error_report(data=None):
+    payload = data if isinstance(data, dict) else {}
+    playback_recovery.report_error(
+        str(payload.get("code") or "panel"),
+        str(payload.get("message") or "재생 오류"),
+        source="panel",
+        detail=str(payload.get("detail") or ""),
+    )
+
+
+@socketio.on("recovery_request")
+@login_required_socket
+def on_recovery_request(_data=None):
+    playback_recovery.start_recovery(initiated_by="panel")
+
+
+@socketio.on("recovery_dismiss")
+@login_required_socket
+def on_recovery_dismiss(_data=None):
+    playback_recovery.dismiss_error()
+
+
+@socketio.on("recovery_request", namespace="/broadcast")
+def on_broadcast_recovery_request(_data=None):
+    playback_recovery.start_recovery(initiated_by="broadcast")
+
+
+@socketio.on("recovery_dismiss", namespace="/broadcast")
+def on_broadcast_recovery_dismiss(_data=None):
+    playback_recovery.dismiss_error()
+
+
+@socketio.on("youtube_playing", namespace="/broadcast")
+def on_youtube_playing(_data=None):
+    """iframe 재생 성공 — 대기 중 yt-dlp 스트림 취소."""
+    bump_stream_generation()
 
 
 @socketio.on("get_state")
@@ -1276,11 +1491,22 @@ def _read_auth_html(mode: str) -> str:
 
 
 def _read_broadcast_html() -> str:
-    return (BUNDLE_DIR / "broadcast" / "index.html").read_text(encoding="utf-8")
+    """dev·exe 동일 — broadcast/index.html 그대로 (socket.io는 /broadcast-static/)."""
+    path = bundle_dir() / "broadcast" / "index.html"
+    if not path.is_file():
+        raise FileNotFoundError(str(path))
+    return path.read_text(encoding="utf-8")
 
 
 def create_socketio_app(cfg: dict[str, Any]) -> tuple[Flask, SocketIO]:
     init_app(cfg)
+    playback_recovery.attach(
+        socketio,
+        load_config,
+        broadcast_command_queue,
+        broadcast_state.snapshot,
+        lambda: broadcast_state.playback_status,
+    )
     return app, socketio
 
 

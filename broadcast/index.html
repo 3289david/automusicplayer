@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>3세대 음방시스템 방송</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="/broadcast-static/js/socket.io.min.js"></script>
   <script src="https://www.youtube.com/iframe_api"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -111,8 +111,17 @@
     #audioUnlock {
       position: fixed; inset: 0; z-index: 40; display: none;
       align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.75); color: #fff;
-      font-size: 18px; font-weight: 700; cursor: pointer;
+      background: rgba(0,0,0,0.55); color: #fff;
+      font-size: clamp(22px, 4vw, 36px); font-weight: 800; cursor: pointer;
+      text-align: center; padding: 24px;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      text-shadow: 0 2px 12px rgba(0,0,0,0.9);
+      border: 3px solid rgba(49, 130, 246, 0.85);
+      animation: unlockPulse 1.4s ease-in-out infinite;
+    }
+    @keyframes unlockPulse {
+      0%, 100% { box-shadow: inset 0 0 0 0 rgba(49, 130, 246, 0.2); }
+      50% { box-shadow: inset 0 0 80px 12px rgba(49, 130, 246, 0.35); }
     }
     #audioUnlock.show { display: flex; }
     .broadcast-credit {
@@ -129,6 +138,75 @@
       transition: opacity 0.35s ease;
     }
     .broadcast-credit.show { opacity: 1; }
+    .playback-error-alert {
+      flex-direction: column;
+      align-items: stretch;
+      min-width: 280px;
+      max-width: 420px;
+      padding: 18px 22px;
+      transform: translate(120%, 0);
+      top: 40px;
+      bottom: auto;
+      right: 40px;
+      pointer-events: none;
+    }
+    .playback-error-alert.show {
+      transform: translate(0, 0);
+      pointer-events: auto;
+    }
+    #ytContainer, #ytContainer iframe, #ytPlayer {
+      pointer-events: auto;
+    }
+    .playback-error-alert .error-msg {
+      font-size: 15px;
+      line-height: 1.5;
+      margin: 8px 0 14px;
+      opacity: 0.92;
+    }
+    .playback-error-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+    .playback-error-actions button {
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      padding: 10px 16px;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+    }
+    .playback-error-actions .btn-cancel {
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+    }
+    .playback-error-actions .btn-recover {
+      background: #3182f6;
+      color: #fff;
+    }
+    .recovery-progress-wrap {
+      margin: 10px 0 4px;
+      display: none;
+    }
+    .recovery-progress-wrap.show { display: block; }
+    .recovery-progress-track {
+      height: 6px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .recovery-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #3182f6, #6b9fff);
+      transition: width 0.25s ease;
+    }
+    .recovery-progress-label {
+      font-size: 12px;
+      margin-top: 6px;
+      opacity: 0.75;
+    }
     #externalPlaybackOverlay {
       position: fixed;
       inset: 0;
@@ -177,13 +255,37 @@
     </p>
   </div>
 
+  <div id="playbackErrorAlert" class="toast-next-song playback-error-alert" aria-live="assertive">
+    <p class="toast-next-head">재생 오류</p>
+    <p class="error-msg" id="playbackErrorMessage"></p>
+    <div class="recovery-progress-wrap" id="recoveryProgressWrap">
+      <div class="recovery-progress-track"><div class="recovery-progress-fill" id="recoveryProgressFill"></div></div>
+      <p class="recovery-progress-label" id="recoveryProgressLabel"></p>
+    </div>
+    <div class="playback-error-actions" id="playbackErrorActions">
+      <button type="button" class="btn-cancel" id="btnErrorCancel">취소</button>
+      <button type="button" class="btn-recover" id="btnErrorRecover">복구</button>
+    </div>
+  </div>
+
   <div class="toast-next-song" id="toast"></div>
   <p class="broadcast-credit" id="broadcastCredit">Made by 신재원, 정규환</p>
 
   <script>
     (function () {
-      var socket = io("/broadcast");
+      if (typeof io === "undefined") {
+        document.body.innerHTML =
+          "<p style='color:#fff;padding:24px;font:16px sans-serif'>socket.io 로드 실패 — 앱을 다시 빌드하거나 네트워크를 확인하세요.</p>";
+        return;
+      }
+
+      var socket = io("/broadcast", {
+        transports: ["websocket", "polling"],
+        reconnection: true,
+        reconnectionAttempts: 20,
+      });
       var ORIGIN = window.location.origin;
+      var KIOSK_MODE = /(?:\?|&)kiosk=1(?:&|$)/.test(location.search);
 
       var ytPlayer = null;
       var ytApiReady = false;
@@ -211,6 +313,18 @@
       var ytErrorRetried = false;
       var streamPlaybackActive = false;
       var streamFallbackRequested = false;
+      var ytApiWatchTimer = null;
+      var activePlaybackMode = "none";
+      var recoveryInProgress = false;
+      var lastHeartbeatAt = 0;
+      var playbackErrorAlert = document.getElementById("playbackErrorAlert");
+      var playbackErrorMessage = document.getElementById("playbackErrorMessage");
+      var recoveryProgressWrap = document.getElementById("recoveryProgressWrap");
+      var recoveryProgressFill = document.getElementById("recoveryProgressFill");
+      var recoveryProgressLabel = document.getElementById("recoveryProgressLabel");
+      var playbackErrorActions = document.getElementById("playbackErrorActions");
+      var btnErrorCancel = document.getElementById("btnErrorCancel");
+      var btnErrorRecover = document.getElementById("btnErrorRecover");
 
       var localVideo = document.getElementById("localVideo");
       var endScreen = document.getElementById("endScreen");
@@ -301,14 +415,106 @@
         if (holder) holder.innerHTML = "";
       }
 
+      function isYoutubeIframePlaying() {
+        if (!ytPlayer || !ytPlayer.getPlayerState) return false;
+        try {
+          var st = ytPlayer.getPlayerState();
+          return st === 1 || st === 3;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      function stopAllPlayback() {
+        if (ytApiWatchTimer) {
+          clearTimeout(ytApiWatchTimer);
+          ytApiWatchTimer = null;
+        }
+        streamFallbackRequested = false;
+        streamPlaybackActive = false;
+        activePlaybackMode = "none";
+        destroyYtPlayer();
+        try {
+          localVideo.pause();
+          localVideo.removeAttribute("src");
+          localVideo.load();
+        } catch (e) {}
+        localVideo.style.display = "none";
+        localVideo.muted = true;
+      }
+
       function hidePlayers() {
         clearInterval(ytPollTimer);
         ytPollTimer = null;
         clearTrackTimers();
-        destroyYtPlayer();
-        localVideo.style.display = "none";
-        localVideo.pause();
-        localVideo.removeAttribute("src");
+        stopAllPlayback();
+      }
+
+      function reportPlaybackError(code, message, detail) {
+        if (code === "stream_failed") return;
+        socket.emit("playback_error_report", {
+          code: code || "playback",
+          message: message || "재생 오류",
+          detail: detail || "",
+        });
+      }
+
+      function emitPlaybackHeartbeat() {
+        if (playbackStatus !== "playing" || currentIndex < 0) return;
+        var now = Date.now();
+        if (now - lastHeartbeatAt < 2800) return;
+        lastHeartbeatAt = now;
+        socket.emit("playback_heartbeat", {
+          index: currentIndex,
+          mode: activePlaybackMode,
+        });
+      }
+
+      function prepareUiForPlayback() {
+        hidePlaybackErrorAlert();
+        hideExternalPlaybackOverlay();
+        if (audioUnlockEl) audioUnlockEl.classList.remove("show");
+        if (playbackErrorAlert) playbackErrorAlert.classList.remove("show");
+        if (KIOSK_MODE && !audioUnlocked) tryKioskAutounlock();
+      }
+
+      function showPlaybackErrorAlert(err) {
+        if (!playbackErrorAlert) return;
+        hideToast();
+        if (playbackErrorMessage) {
+          playbackErrorMessage.textContent = err.message || "재생 오류가 발생했습니다.";
+        }
+        playbackErrorAlert.classList.add("show");
+        if (recoveryProgressWrap) recoveryProgressWrap.classList.remove("show");
+        if (playbackErrorActions) playbackErrorActions.style.display = "";
+      }
+
+      function hidePlaybackErrorAlert() {
+        if (playbackErrorAlert) playbackErrorAlert.classList.remove("show");
+        recoveryInProgress = false;
+        if (recoveryProgressWrap) recoveryProgressWrap.classList.remove("show");
+        if (playbackErrorActions) playbackErrorActions.style.display = "";
+      }
+
+      function setRecoveryProgress(percent, step) {
+        recoveryInProgress = true;
+        if (playbackErrorActions) playbackErrorActions.style.display = "none";
+        if (recoveryProgressWrap) recoveryProgressWrap.classList.add("show");
+        if (recoveryProgressFill) recoveryProgressFill.style.width = percent + "%";
+        if (recoveryProgressLabel) recoveryProgressLabel.textContent = step || "";
+      }
+
+      if (btnErrorCancel) {
+        btnErrorCancel.addEventListener("click", function () {
+          socket.emit("recovery_dismiss");
+          hidePlaybackErrorAlert();
+        });
+      }
+      if (btnErrorRecover) {
+        btnErrorRecover.addEventListener("click", function () {
+          setRecoveryProgress(5, "복구 요청…");
+          socket.emit("recovery_request");
+        });
       }
 
       function applyYoutubeQuality(player) {
@@ -337,13 +543,14 @@
 
       function startPlaybackAfterUnlock() {
         if (playbackStatus === "paused") return;
-        if (ytPlayer && ytPlayer.playVideo) {
+        if (activePlaybackMode === "youtube" && ytPlayer && ytPlayer.playVideo) {
           try {
             ytPlayer.playVideo();
             applyYoutubeQuality(ytPlayer);
           } catch (e) {}
-        }
-        if (localVideo.src) {
+        } else if (activePlaybackMode === "stream" && localVideo.src) {
+          localVideo.play().catch(function () {});
+        } else if (activePlaybackMode === "local" && localVideo.src) {
           localVideo.play().catch(function () {});
         }
       }
@@ -351,6 +558,12 @@
       function showAudioUnlockOverlay() {
         if (audioUnlocked) return;
         audioUnlockEl.classList.add("show");
+      }
+
+      function tryKioskAutounlock() {
+        if (audioUnlocked) return;
+        if (!KIOSK_MODE) return;
+        unlockBroadcastAudio();
       }
 
       function unlockBroadcastAudio() {
@@ -540,6 +753,20 @@
           return;
         }
         if (event.data === YT.PlayerState.PLAYING) {
+          if (ytApiWatchTimer) {
+            clearTimeout(ytApiWatchTimer);
+            ytApiWatchTimer = null;
+          }
+          streamFallbackRequested = false;
+          streamPlaybackActive = false;
+          activePlaybackMode = "youtube";
+          try {
+            localVideo.pause();
+            localVideo.removeAttribute("src");
+            localVideo.style.display = "none";
+          } catch (e) {}
+          socket.emit("youtube_playing");
+          emitPlaybackHeartbeat();
           if (!audioUnlocked) {
             try {
               event.target.pauseVideo();
@@ -577,13 +804,18 @@
             applyYoutubeQuality(p);
             if (playbackStatus !== "paused") p.playVideo();
           } else {
-            p.mute();
-            if (item && item.id && p.cueVideoById) {
+            try {
+              p.mute();
+            } catch (eMute) {}
+            if (playbackStatus !== "paused") {
+              try {
+                p.playVideo();
+              } catch (ePlay) {
+                if (item && item.id && p.cueVideoById) p.cueVideoById(item.id);
+              }
+            } else if (item && item.id && p.cueVideoById) {
               p.cueVideoById(item.id);
             }
-            try {
-              p.pauseVideo();
-            } catch (e2) {}
             showAudioUnlockOverlay();
           }
           if (item) beginTrackPlayback(item);
@@ -591,6 +823,18 @@
         } catch (e) {
           showAudioUnlockOverlay();
         }
+      }
+
+      function scheduleYtApiWatchdog(item) {
+        if (ytApiWatchTimer) clearTimeout(ytApiWatchTimer);
+        if (!item || item.type !== "youtube") return;
+        ytApiWatchTimer = setTimeout(function () {
+          ytApiWatchTimer = null;
+          if (streamPlaybackActive || streamFallbackRequested) return;
+          if (activePlaybackMode === "youtube" && isYoutubeIframePlaying()) return;
+          if (ytApiReady && ytPlayer) return;
+          requestYoutubeStreamFallback();
+        }, 12000);
       }
 
       function isEmbedRestrictedError(code) {
@@ -629,13 +873,15 @@
       }
 
       function requestYoutubeStreamFallback() {
-        if (streamFallbackRequested || streamPlaybackActive) return;
+        if (streamPlaybackActive) return;
+        if (isYoutubeIframePlaying()) return;
+        if (streamFallbackRequested) return;
         var item = playlist[currentIndex];
         if (!item || item.type !== "youtube" || !item.id) return;
         streamFallbackRequested = true;
         clearTrackTimers();
         clearAdvanceRetry();
-        destroyYtPlayer();
+        stopAllPlayback();
         if (ytContainer) ytContainer.style.display = "none";
         showExternalPlaybackOverlay(item, "stream");
         socket.emit("youtube_embed_blocked", {
@@ -646,8 +892,15 @@
       }
 
       function playYoutubeStream(data) {
+        if (isYoutubeIframePlaying()) {
+          streamFallbackRequested = false;
+          return;
+        }
+        stopAllPlayback();
         streamFallbackRequested = false;
         streamPlaybackActive = true;
+        activePlaybackMode = "stream";
+        prepareUiForPlayback();
         hideExternalPlaybackOverlay();
         if (typeof data.index === "number" && data.index >= 0) {
           currentIndex = data.index;
@@ -664,8 +917,8 @@
         if (url && url.indexOf("/") === 0) url = ORIGIN + url;
 
         localVideo.style.display = "block";
-        localVideo.controls = true;
-        localVideo.setAttribute("controls", "");
+        localVideo.controls = false;
+        localVideo.removeAttribute("controls");
         localVideo.muted = !audioUnlocked;
         localVideo.volume = 1;
         localVideo.src = url;
@@ -692,14 +945,19 @@
           requestYoutubeStreamFallback();
           return;
         }
+        if (streamPlaybackActive || streamFallbackRequested) {
+          reportPlaybackError("youtube_error", "YouTube 재생 오류 (코드 " + code + ")");
+          return;
+        }
         var item = playlist[currentIndex];
         if (item && item.type === "youtube" && !ytErrorRetried) {
           ytErrorRetried = true;
-          destroyYtPlayer();
+          stopAllPlayback();
+          activePlaybackMode = "youtube";
           createYtPlayer(item);
           return;
         }
-        showToast("영상 재생 오류 — 다음 곡으로 넘깁니다");
+        reportPlaybackError("youtube_error", "YouTube 재생 오류 — 다음 곡으로 넘깁니다");
         setTimeout(onTrackEnded, 800);
       }
 
@@ -707,13 +965,17 @@
         if (!item || !item.id) return;
         var holder = document.getElementById("ytPlayer");
         if (!holder) return;
+        destroyYtPlayer();
         holder.innerHTML = "";
-        ytPlayer = new YT.Player("ytPlayer", {
+        var mountId = "ytMount_" + Date.now();
+        holder.innerHTML = '<div id="' + mountId + '"></div>';
+        ytPlayer = new YT.Player(mountId, {
           height: "100%",
           width: "100%",
           videoId: item.id,
           playerVars: {
-            autoplay: 0,
+            autoplay: 1,
+            mute: audioUnlocked ? 0 : 1,
             controls: 1,
             modestbranding: 1,
             rel: 0,
@@ -741,6 +1003,9 @@
           if (probe > 0) scheduleTrackTimers(item);
         }
         syncPlaybackProgress();
+        if (playbackStatus === "playing" && (p.current > 0 || activePlaybackMode === "youtube")) {
+          emitPlaybackHeartbeat();
+        }
       }
 
       function startYtProgressPoll() {
@@ -766,8 +1031,11 @@
       function playYoutube(item) {
         if (!item || !item.id) {
           showToast("유효하지 않은 YouTube 영상 ID");
+          reportPlaybackError("invalid_id", "유효하지 않은 YouTube 영상 ID");
           return;
         }
+        if (streamPlaybackActive) stopAllPlayback();
+        activePlaybackMode = "youtube";
         if (ytContainer) ytContainer.style.display = "block";
         clearAdvanceRetry();
         ytErrorRetried = false;
@@ -802,6 +1070,7 @@
           createYtPlayer(item);
         } else {
           ytPendingItem = item;
+          scheduleYtApiWatchdog(item);
         }
       }
 
@@ -813,9 +1082,10 @@
         nextAlertSent = false;
         endScreen.classList.remove("show");
         broadcastEndedAck = false;
+        lastHeartbeatAt = 0;
+        prepareUiForPlayback();
         streamPlaybackActive = false;
         streamFallbackRequested = false;
-        hideExternalPlaybackOverlay();
         if (ytContainer) ytContainer.style.display = "block";
 
         var item = playlist[currentIndex];
@@ -825,6 +1095,8 @@
         ytErrorRetried = false;
 
         if (item.type === "youtube") {
+          stopAllPlayback();
+          activePlaybackMode = "youtube";
           streamPlaybackActive = false;
           streamFallbackRequested = false;
           localVideo.controls = false;
@@ -837,12 +1109,9 @@
           if (ytContainer) ytContainer.style.display = "block";
           playYoutube(item);
         } else {
+          stopAllPlayback();
+          activePlaybackMode = "local";
           if (ytContainer) ytContainer.style.display = "none";
-          if (ytPlayer && ytPlayer.stopVideo) {
-            try {
-              ytPlayer.stopVideo();
-            } catch (e) {}
-          }
           localVideo.style.display = "block";
           localVideo.muted = false;
           localVideo.volume = 1;
@@ -860,6 +1129,7 @@
           }
         }
         if (audioUnlocked) tryAutoplayWithSound();
+        else if (KIOSK_MODE) tryKioskAutounlock();
         else showAudioUnlockOverlay();
       }
 
@@ -962,7 +1232,48 @@
       });
 
       socket.on("youtube_stream_playback", function (data) {
+        if (isYoutubeIframePlaying()) return;
         playYoutubeStream(data || {});
+      });
+
+      socket.on("playback_error", function (err) {
+        showPlaybackErrorAlert(err || {});
+      });
+
+      socket.on("playback_error_cleared", function () {
+        hidePlaybackErrorAlert();
+      });
+
+      socket.on("recovery_progress", function (data) {
+        setRecoveryProgress(
+          (data && data.percent) || 0,
+          (data && data.step) || ""
+        );
+      });
+
+      socket.on("recovery_finished", function () {
+        hidePlaybackErrorAlert();
+      });
+
+      socket.on("playback_recover", function (state) {
+        hidePlaybackErrorAlert();
+        recoveryInProgress = false;
+        playlist = (state && state.playlist) || playlist;
+        currentIndex =
+          state && typeof state.current_index === "number"
+            ? state.current_index
+            : currentIndex;
+        playbackStatus = (state && state.playback_status) || playbackStatus;
+        lastHeartbeatAt = 0;
+        if (currentIndex < 0 || playbackStatus === "stopped" || playbackStatus === "ended") {
+          if (currentIndex < 0) showEndScreen();
+          return;
+        }
+        audioUnlocked = true;
+        if (audioUnlockEl) audioUnlockEl.classList.remove("show");
+        setTimeout(function () {
+          playCurrent();
+        }, 120);
       });
 
       socket.on("youtube_browser_fallback_started", function (data) {
@@ -989,9 +1300,10 @@
       socket.on("youtube_stream_failed", function () {
         streamFallbackRequested = false;
         streamPlaybackActive = false;
+        activePlaybackMode = "none";
         hideExternalPlaybackOverlay();
         if (ytContainer) ytContainer.style.display = "block";
-        showToast("재생 실패 — 다음 곡으로 넘깁니다");
+        showToast("스트림 재생 실패 — 다음 곡으로 넘깁니다");
         setTimeout(onTrackEnded, 800);
       });
 
@@ -1019,14 +1331,18 @@
           localVideo.pause();
         } else if (playbackStatus === "playing") {
           if (!audioUnlocked) {
-            showAudioUnlockOverlay();
-            if (ytPlayer && ytPlayer.pauseVideo) {
-              try {
-                ytPlayer.pauseVideo();
-              } catch (e) {}
+            if (KIOSK_MODE) {
+              tryKioskAutounlock();
+            } else {
+              showAudioUnlockOverlay();
+              if (ytPlayer && ytPlayer.pauseVideo) {
+                try {
+                  ytPlayer.pauseVideo();
+                } catch (e) {}
+              }
+              localVideo.pause();
+              return;
             }
-            localVideo.pause();
-            return;
           }
           if (ytPlayer && ytPlayer.playVideo) {
             try {
@@ -1095,8 +1411,25 @@
       document.addEventListener("keydown", handleEscapeKey, true);
       window.addEventListener("keydown", handleEscapeKey, true);
 
+      socket.on("connect", function () {
+        socket.emit("request_sync");
+        if (!audioUnlocked && currentIndex >= 0 && playbackStatus === "playing") {
+          if (KIOSK_MODE) tryKioskAutounlock();
+          else showAudioUnlockOverlay();
+        }
+      });
+
+      socket.on("disconnect", function () {
+        if (ytApiWatchTimer) {
+          clearTimeout(ytApiWatchTimer);
+          ytApiWatchTimer = null;
+        }
+      });
+
       window.addEventListener("load", function () {
-        if (!audioUnlocked && currentIndex >= 0) {
+        if (KIOSK_MODE) {
+          setTimeout(tryKioskAutounlock, 400);
+        } else if (!audioUnlocked && currentIndex >= 0) {
           showAudioUnlockOverlay();
         }
       });

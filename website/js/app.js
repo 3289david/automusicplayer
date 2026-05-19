@@ -470,9 +470,18 @@ document.getElementById('btnSyncPush').addEventListener('click', async () => {
     ]);
     const { playlist: pl } = await plRes.json();
     const { settings } = await setRes.json();
+    const playlistForSync = (pl || []).map((row) => ({
+      type: row.type || 'youtube',
+      id: row.song_id || row.id,
+      song_id: row.song_id || row.id,
+      title: row.title,
+      thumbnail: row.thumbnail || '',
+      path: row.path || '',
+      duration: row.duration || 0,
+    }));
     const res = await apiFetch('/api/sync/push', {
       method: 'POST',
-      body: JSON.stringify({ playlist: pl, settings }),
+      body: JSON.stringify({ playlist: playlistForSync, settings }),
     });
     if (!res.ok) throw new Error();
     const data = await res.json();

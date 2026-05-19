@@ -289,6 +289,20 @@ app.put('/api/settings', requireAuth, async c => {
 });
 
 // ── Sync ──────────────────────────────────────────────────────────────────────
+const YT_VIDEO_ID_RE = /^[a-zA-Z0-9_-]{11}$/;
+
+/** 앱은 YouTube 영상 ID를 `id`에, DB/API 행은 숫자 `id` + `song_id` — song_id 우선 */
+function resolveSongId(item) {
+  const songId = item?.song_id != null ? String(item.song_id).trim() : '';
+  const id = item?.id != null ? String(item.id).trim() : '';
+  if (songId && YT_VIDEO_ID_RE.test(songId)) return songId;
+  if (id && YT_VIDEO_ID_RE.test(id)) return id;
+  if (songId) return songId;
+  // GET /api/playlist 의 숫자 id(행 PK)가 YouTube ID로 들어가는 것 방지
+  if (id && /^\d+$/.test(id)) return '';
+  return id;
+}
+
 // POST /api/sync/push — Windows app pushes its full state to DB
 app.post('/api/sync/push', requireAuth, async c => {
   try {
@@ -298,11 +312,19 @@ app.post('/api/sync/push', requireAuth, async c => {
     if (Array.isArray(playlist)) {
       await c.env.DB.prepare('DELETE FROM playlist').run();
       if (playlist.length > 0) {
-        const stmts = playlist.map((item, idx) =>
+        const valid = playlist.filter((item) => resolveSongId(item) && item.title);
+        const stmts = valid.map((item, idx) =>
           c.env.DB.prepare(
             'INSERT INTO playlist (sort_order,type,song_id,title,thumbnail,path,duration) VALUES (?,?,?,?,?,?,?)'
-          ).bind(idx, item.type || 'youtube', item.id || item.song_id, item.title,
-            item.thumbnail || '', item.path || '', item.duration || 0)
+          ).bind(
+            idx,
+            item.type || 'youtube',
+            resolveSongId(item),
+            item.title,
+            item.thumbnail || '',
+            item.path || '',
+            item.duration || 0,
+          )
         );
         await c.env.DB.batch(stmts);
       }

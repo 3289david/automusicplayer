@@ -1,10 +1,16 @@
 """YouTube URL 파싱·메타데이터 (yt-dlp)."""
 from __future__ import annotations
 
+import os
 import re
+import sys
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import yt_dlp
+
+from app_meta import EXE_NAME
 
 _YT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 _YT_URL_PATTERNS = (
@@ -21,11 +27,14 @@ _YT_EXTRACTOR_ARGS = {
     }
 }
 
+# 1080p 우선 (방송 화면 <video> 폴백용)
 _YT_FORMAT_CANDIDATES = (
+    "bestvideo[height<=1080][vcodec!=none][ext=mp4]+bestaudio[acodec!=none][ext=m4a]/"
+    "bestvideo[height<=1080][vcodec!=none]+bestaudio[acodec!=none]/"
+    "bestvideo[height<=720][vcodec!=none]+bestaudio[acodec!=none]/"
+    "best[height<=1080][acodec!=none][vcodec!=none]/"
     "best[acodec!=none][vcodec!=none]/"
-    "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
-    "bestvideo+bestaudio/"
-    "best"
+    "best",
 )
 
 
@@ -43,13 +52,23 @@ def parse_youtube_video_id(value: str) -> str | None:
     return None
 
 
+def _frozen_cache_dir() -> Path:
+    base = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / EXE_NAME
+    cache = base / "yt-dlp-cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    return cache
+
+
 def _base_ydl_opts() -> dict[str, Any]:
-    return {
+    opts: dict[str, Any] = {
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
         "extractor_args": _YT_EXTRACTOR_ARGS,
     }
+    if getattr(sys, "frozen", False):
+        opts["cachedir"] = str(_frozen_cache_dir())
+    return opts
 
 
 def fetch_youtube_video_meta(video_id: str) -> dict[str, Any]:
@@ -79,8 +98,8 @@ def fetch_youtube_video_meta(video_id: str) -> dict[str, Any]:
     }
 
 
-def _format_score(fmt: dict[str, Any]) -> tuple[int, int, int]:
-    """높을수록 선호: 영상+음성 > 영상만 > 음성만, 해상도·비트레이트."""
+def _format_score(fmt: dict[str, Any]) -> tuple[int, int, int, int]:
+    """높을수록 선호: 영상+음성 > 영상만, 해상도·fps·비트레이트."""
     has_video = fmt.get("vcodec") not in (None, "none")
     has_audio = fmt.get("acodec") not in (None, "none")
     try:
@@ -91,6 +110,10 @@ def _format_score(fmt: dict[str, Any]) -> tuple[int, int, int]:
         tbr = int(fmt.get("tbr") or 0)
     except (TypeError, ValueError):
         tbr = 0
+    try:
+        fps = int(fmt.get("fps") or 0)
+    except (TypeError, ValueError):
+        fps = 0
     if has_video and has_audio:
         kind = 2
     elif has_video:
@@ -99,7 +122,7 @@ def _format_score(fmt: dict[str, Any]) -> tuple[int, int, int]:
         kind = 0
     else:
         kind = -1
-    return (kind, height, tbr)
+    return (kind, height, fps, tbr)
 
 
 def _pick_stream_url(info: dict[str, Any]) -> str:

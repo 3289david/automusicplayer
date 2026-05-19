@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/css/style.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="/static/js/socket.io.min.js"></script>
 </head>
 <body>
   <header class="win-chrome" id="winChrome">
@@ -173,6 +173,23 @@
             </label>
           </div>
           <div class="card">
+            <h2 class="section-title">방송 오류 복구</h2>
+            <p class="hint">재생 멈춤·소리/영상 오류 시 패널·방송 화면에 알림이 표시됩니다. 곡 시작 후 약 22초는 버퍼링 감시에서 제외됩니다.</p>
+            <label class="field-label" for="playbackStallSeconds">무응답 감지 (초)</label>
+            <input type="number" id="playbackStallSeconds" class="input" min="5" max="120" value="10" />
+            <p class="hint" style="margin-top:.75rem">복구 방식</p>
+            <label class="radio-row">
+              <input type="radio" name="playbackRecoverMode" value="manual" checked />
+              사용자 승인 후 복구
+            </label>
+            <label class="radio-row">
+              <input type="radio" name="playbackRecoverMode" value="auto" />
+              무응답 시 자동 복구
+            </label>
+            <button type="button" class="btn-primary btn-block" id="btnSavePlaybackRecovery" style="margin-top:.75rem">저장</button>
+            <p class="hint" id="playbackRecoverySaveHint"></p>
+          </div>
+          <div class="card">
             <h2 class="section-title">☁️ Cloudflare 연동 설정</h2>
             <p class="hint" style="margin-bottom:.75rem">서버: <strong>auto-music-player-backend.rukkit.workers.dev</strong></p>
             <label class="toggle-row" style="margin:.6rem 0">
@@ -294,6 +311,21 @@
     </div>
   </div>
 
+  <div class="modal-overlay app-modal-overlay" id="recoveryModal" hidden>
+    <div class="modal card app-modal modal-wide">
+      <h2>방송 재생 오류</h2>
+      <p id="recoveryModalMessage" class="app-modal-message"></p>
+      <div id="recoveryModalProgress" class="recovery-modal-progress" hidden>
+        <div class="recovery-modal-track"><div id="recoveryModalProgressFill" class="recovery-modal-fill"></div></div>
+        <p class="hint" id="recoveryModalProgressLabel"></p>
+      </div>
+      <div class="modal-actions app-modal-actions" id="recoveryModalActions">
+        <button type="button" class="btn-ghost" id="recoveryModalCancel">취소</button>
+        <button type="button" class="btn-primary" id="recoveryModalRecover">복구</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay app-modal-overlay" id="appModal" hidden>
     <div class="modal card app-modal">
       <h2 id="appModalTitle">안내</h2>
@@ -307,6 +339,7 @@
 
   <script src="/static/js/window-chrome.js"></script>
   <script src="/static/js/app-modal.js"></script>
+  <script src="/static/js/recovery-modal.js"></script>
   <script src="/static/js/panel.js"></script>
 </body>
 </html>

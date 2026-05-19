@@ -22,8 +22,16 @@ def get_install_dir() -> Path:
 def get_bundle_dir() -> Path:
     """패널/방송 HTML 등 번들 리소스 (PyInstaller _MEIPASS)."""
     if getattr(sys, "frozen", False):
-        return Path(getattr(sys, "_MEIPASS", get_install_dir()))
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return Path(meipass)
+        return get_install_dir()
     return Path(__file__).resolve().parent
+
+
+def bundle_dir() -> Path:
+    """실행 시점 번들 경로 (exe 압축 해제 후)."""
+    return get_bundle_dir()
 
 
 INSTALL_DIR = get_install_dir()
@@ -45,6 +53,8 @@ CF_DEFAULTS: dict[str, Any] = {
     "cf_password": "1234",
     "cf_auto_pull_on_start": True,   # pull from DB when app launches
     "cf_auto_push_on_stop": False,   # push to DB when app closes (opt-in)
+    "playback_error_stall_seconds": 10,
+    "playback_error_recover_mode": "manual",  # manual | auto
 }
 
 
@@ -60,6 +70,8 @@ def load_config() -> dict[str, Any]:
             "autostart": False,
             "broadcast_browser": "auto",
             "onboarding_complete": False,
+            "playback_error_stall_seconds": 10,
+            "playback_error_recover_mode": "manual",
             **CF_DEFAULTS,
         }
         save_config(cfg)

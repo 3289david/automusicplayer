@@ -797,6 +797,31 @@ body:not(.has-win-chrome) .app-shell {
   display: none !important;
 }
 
+.recovery-modal-progress {
+  margin: 0 0 16px;
+}
+
+.recovery-modal-track {
+  height: 8px;
+  background: var(--border, #e5e8eb);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.recovery-modal-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--primary, #3182f6);
+  transition: width 0.25s ease;
+}
+
+.field-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
 .modal {
   width: 100%;
   max-width: 400px;

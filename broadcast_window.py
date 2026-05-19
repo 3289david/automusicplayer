@@ -19,6 +19,8 @@ _external_yt_proc: subprocess.Popen | None = None
 _CHROMIUM_AUTOPLAY_FLAGS = [
     "--autoplay-policy=no-user-gesture-required",
     "--disable-features=PreloadMediaEngagementData,MediaEngagementBypassAutoplayPolicies",
+    "--ignore-gpu-blocklist",
+    "--enable-gpu-rasterization",
 ]
 
 _CHROME_EXTRA = [
@@ -106,8 +108,9 @@ def list_available_browsers() -> dict[str, bool]:
 
 
 def resolve_browser_exe(preference: str | None = None) -> tuple[str, str] | None:
+    """방송 키오스크용 — 설치된 Edge/Chrome만 (WebView2 런타임 exe 제외)."""
     pref = (preference or "auto").lower().strip()
-    edge = find_edge_for_kiosk() or find_edge()
+    edge = find_edge_for_kiosk()
     chrome = find_chrome()
     if pref == "edge":
         if edge:

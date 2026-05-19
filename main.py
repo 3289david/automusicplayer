@@ -4,11 +4,15 @@
 """
 from __future__ import annotations
 
+import multiprocessing
 import os
 import queue
 import sys
 import threading
 import time
+
+if getattr(sys, "frozen", False):
+    multiprocessing.freeze_support()
 
 import cloudflare_sync
 from app_icon_util import apply_windows_app_identity, ensure_app_icon_ico
@@ -16,7 +20,7 @@ from panel_log import install_crash_logging, panel_log_path, setup_panel_logging
 from webview2_runtime import configure_bundled_webview2
 from app_meta import APP_NAME
 from broadcast_window import close_broadcast_window
-from config_store import WEBSITE_PORT, load_config
+from config_store import BUNDLE_DIR, INSTALL_DIR, WEBSITE_PORT, load_config
 from network_utils import network_access_urls
 from panel_window import enqueue_panel_window_command, run_on_main_thread, run_panel_native, stop_panel_window
 from playlist_store import load_playlist, save_playlist
@@ -29,6 +33,33 @@ _command_queue: queue.Queue = queue.Queue()
 _shutting_down = False
 
 
+def _resync_broadcast_after_open(port: int) -> None:
+    """방송 키오스크가 뜬 뒤 load_track 이벤트가 유실되지 않도록 재동기화."""
+    import urllib.error
+    import urllib.request
+
+    from server import resync_broadcast_clients
+
+    url = f"http://127.0.0.1:{port}/broadcast/?kiosk=1"
+    log = setup_panel_logging()
+    for _ in range(40):
+        if _shutting_down:
+            return
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                if resp.status < 500:
+                    break
+        except (urllib.error.URLError, OSError, TimeoutError):
+            time.sleep(0.25)
+    time.sleep(0.6)
+    try:
+        resync_broadcast_clients()
+        log.info("broadcast resync sent after kiosk open")
+    except Exception:
+        log.error("broadcast resync failed", exc_info=True)
+
+
 def _schedule_open_broadcast(display_index: int, port: int) -> None:
     """방송 창은 Win32 메인 스레드에서 연다 (백그라운드 스레드·MessageBox 오류 방지)."""
 
@@ -39,6 +70,11 @@ def _schedule_open_broadcast(display_index: int, port: int) -> None:
         try:
             minimize_other_windows(set())
             open_broadcast_window(display_index, port)
+            threading.Thread(
+                target=_resync_broadcast_after_open,
+                args=(port,),
+                daemon=True,
+            ).start()
             setup_panel_logging().info(
                 "broadcast window opened display=%s port=%s",
                 display_index,
@@ -142,6 +178,10 @@ def _process_commands(port: int) -> None:
                 _schedule_external_youtube(
                     video_id, display_index, duration, finished_index
                 )
+            elif action == "close_external_youtube":
+                from broadcast_window import close_external_youtube
+
+                close_external_youtube()
         except Exception:
             setup_panel_logging().error("command %s failed", action, exc_info=True)
 
@@ -166,7 +206,22 @@ def _shutdown() -> None:
 
 def main() -> None:
     install_crash_logging()
-    setup_panel_logging().info("main() start log=%s", panel_log_path())
+    log = setup_panel_logging()
+    log.info("main() start log=%s", panel_log_path())
+    if getattr(sys, "frozen", False):
+        from config_store import bundle_dir
+
+        bd = bundle_dir()
+        log.info("frozen bundle_dir=%s install_dir=%s", bd, INSTALL_DIR)
+        for rel in (
+            "panel/index.html",
+            "broadcast/index.html",
+            "website/index.html",
+            "panel/static/js/socket.io.min.js",
+            "broadcast/js/socket.io.min.js",
+        ):
+            p = bd / rel
+            log.info("bundle %s exists=%s", rel, p.is_file())
     apply_windows_app_identity()
     ensure_app_icon_ico()
     configure_bundled_webview2()

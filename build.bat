@@ -3,6 +3,7 @@ chcp 65001 >nul
 cd /d "%~dp0"
 
 echo === 3세대 음방시스템 빌드 (단일 exe) ===
+echo  패치: 복구/선로딩/1080p스트림/DB동기화/다른PC호환
 
 if not exist "14720088.png" (
     echo [오류] 14720088.png 가 이 폴더에 없습니다.
@@ -10,7 +11,7 @@ if not exist "14720088.png" (
     exit /b 1
 )
 
-python -m pip install -q -r requirements.txt pyinstaller
+python -m pip install -q -r requirements.txt pyinstaller cffi
 if errorlevel 1 (
     echo [오류] pip 설치 실패
     pause
@@ -20,6 +21,19 @@ if errorlevel 1 (
 python -c "from PIL import Image; Image.open('14720088.png').convert('RGBA').save('app_icon.ico', format='ICO', sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(16,16)]); print('app_icon.ico OK')"
 if errorlevel 1 (
     echo [오류] 아이콘 변환 실패
+    pause
+    exit /b 1
+)
+
+echo.
+echo [0/2] 방송용 socket.io 번들 복사…
+if not exist "panel\static\js\socket.io.min.js" (
+    powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://cdn.socket.io/4.7.5/socket.io.min.js' -OutFile 'panel\static\js\socket.io.min.js' -UseBasicParsing"
+)
+if not exist "broadcast\js" mkdir "broadcast\js"
+copy /Y "panel\static\js\socket.io.min.js" "broadcast\js\socket.io.min.js" >nul
+if errorlevel 1 (
+    echo [오류] socket.io.min.js 없음 — panel\static\js 확인
     pause
     exit /b 1
 )

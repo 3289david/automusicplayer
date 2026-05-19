@@ -35,3 +35,6 @@ desktop.ini
 *.log
 crash_*.txt
 
+# Local archives
+backend.zip
+

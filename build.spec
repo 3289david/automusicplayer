@@ -1,8 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller — 단일 exe (WebView2Runtime 포함, 배포는 exe 하나)
+# PyInstaller — 단일 exe (WebView2Runtime + panel/broadcast/website 번들)
+#
+# 포함 기능 (2026-05):
+#   - WebView2 패널, Edge/Chrome 방송 키오스크, 포트 2026 관리자 웹
+#   - Cloudflare D1 동기화, yt-dlp 스트림 폴백(1080p)·선로딩
+#   - 방송 재생 오류 감지·복구, DB song_id 동기화 수정
+#
+# 빌드: build.bat  또는  pyinstaller --noconfirm --clean build.spec
+# 주의: runtime_tmpdir 을 빌드 PC 경로로 고정하면 다른 PC에서 LOADER 실패함.
+import os
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
+
+# None = 실행 PC의 %TEMP% 에 자동 압축 해제 (다른 PC 호환)
 
 block_cipher = None
 root = Path(SPECPATH)
@@ -27,15 +38,58 @@ else:
         "빌드 전에 python prepare_webview2_runtime.py 를 실행하세요."
     )
 
-for pkg in ("flask", "flask_login", "werkzeug", "jinja2", "yt_dlp"):
+for pkg in ("flask", "flask_login", "werkzeug", "jinja2", "certifi"):
     try:
         datas += collect_data_files(pkg, include_py_files=True)
     except Exception:
         pass
 
+hiddenimports_ytdlp: list[str] = []
+hiddenimports_extra: list[str] = []
+for pkg in ("yt_dlp", "Cryptodome", "certifi", "cffi"):
+    try:
+        d, b, h = collect_all(pkg)
+        datas += d
+        binaries += b
+        if pkg == "yt_dlp":
+            hiddenimports_ytdlp = h
+        else:
+            hiddenimports_extra += h
+    except Exception:
+        pass
+
+# 앱 전용 모듈 (Analysis 가 놓치기 쉬운 항목)
+_APP_MODULES = (
+    "playback_recovery",
+    "youtube_prefetch",
+    "website_server",
+    "network_utils",
+    "cloudflare_sync",
+    "broadcast_window",
+    "panel_window",
+    "panel_log",
+    "playlist_store",
+    "config_store",
+    "state",
+    "youtube_util",
+    "youtube_search",
+    "webview2_runtime",
+    "win_desktop",
+    "tray_icon",
+    "single_instance",
+    "startup",
+    "app_meta",
+    "app_icon_util",
+)
+
 hiddenimports = [
+    *hiddenimports_ytdlp,
+    *hiddenimports_extra,
+    *_APP_MODULES,
     "engineio.async_drivers.threading",
     "simple_websocket",
+    "simple_websocket.ws",
+    "certifi",
     "dns",
     "dns.resolver",
     "bcrypt",
@@ -54,6 +108,11 @@ hiddenimports = [
     "pythoncom",
     "pywintypes",
     "six",
+    "Cryptodome",
+    "Cryptodome.Cipher",
+    "Cryptodome.Hash",
+    "Cryptodome.PublicKey",
+    "concurrent.futures",
 ]
 
 _collect_packages = (
@@ -103,13 +162,14 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[str(root / "pyi_rth_eumbang.py")],
     excludes=[
         "eventlet",
         "gevent",
         "matplotlib",
         "numpy",
         "pandas",
+        "Cryptodome.SelfTest",
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -136,7 +196,6 @@ exe = EXE(
     strip=False,
     upx=False,
     upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
